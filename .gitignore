@@ -4,7 +4,11 @@
 *.v
 *.vhdl
 *.dcp
-
+*.xdc
+*.wdf
+*.wpc
+*.xml
+*.vh
 
 # Ignore the powerpoint
 *.ppt

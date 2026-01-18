@@ -49,32 +49,92 @@ assign VF = VD && ~vh_blank_i[1];  // Vertical Falling edge (leaving blank)
 
 // Animation counter
 reg [25:0] frame_counter;
-reg [10:0] sprite_x, sprite_y;  // Sprite position (centered)
-reg        blink_state;  // For blinking animation
 
-// Sprite size and position (64x64 sprite, centered)
-localparam SPRITE_SIZE = 64;
-localparam CENTER_X = 960;  // 1920/2
-localparam CENTER_Y = 540;  // 1080/2
+// Snowflake parameters
+localparam NUM_SNOWFLAKES = 12;
+localparam SNOWFLAKE_SIZE = 16;  // Size of each snowflake
+
+// Snowflake positions and properties
+reg [10:0] snowflake_x [0:NUM_SNOWFLAKES-1];  // X positions
+reg [10:0] snowflake_y [0:NUM_SNOWFLAKES-1];  // Y positions
+reg [7:0]  snowflake_rot [0:NUM_SNOWFLAKES-1];  // Rotation angle (0-255)
+reg [3:0]  snowflake_speed [0:NUM_SNOWFLAKES-1];  // Fall speed (1-15)
 
 // Colors
-localparam [23:0] COLOR_YELLOW = 24'hFF_FF_00;  // Yellow (Pikachu body)
-localparam [23:0] COLOR_RED    = 24'hFF_00_00;  // Red (cheeks)
-localparam [23:0] COLOR_BLACK   = 24'h00_00_00;  // Black (eyes, mouth)
-localparam [23:0] COLOR_BROWN  = 24'h8B_45_13;  // Brown (ears)
-localparam [23:0] COLOR_BG     = 24'h00_00_00;  // Black background
+localparam [23:0] COLOR_SNOWFLAKE = 24'hFF_FF_FF;  // White snowflakes
+localparam [23:0] COLOR_BG_DARK  = 24'h00_00_20;  // Dark blue background
+localparam [23:0] COLOR_BG       = 24'h00_00_40;  // Slightly lighter blue
 
 reg [23:0]  vid_rgb_d1;
 reg [2:0]   dvh_sync_d1;
 
-// Function to check if pixel is in sprite bounds
-wire [10:0] sprite_rel_x, sprite_rel_y;
-assign sprite_rel_x = HCNT - sprite_x;
-assign sprite_rel_y = VCNT - sprite_y;
-wire in_sprite;
-assign in_sprite = (HCNT >= sprite_x && HCNT < sprite_x + SPRITE_SIZE &&
-                    VCNT >= sprite_y && VCNT < sprite_y + SPRITE_SIZE);
+// Function to draw a simple snowflake pattern
+function [23:0] draw_snowflake;
+    input [10:0] px, py;  // Pixel coordinates
+    input [10:0] sx, sy;  // Snowflake center X, Y
+    input [7:0]  rot;     // Rotation (not used in simplified version)
+    reg [10:0] rel_x, rel_y;
+    reg [10:0] abs_x, abs_y;
+    begin
+        // Calculate relative position (absolute value)
+        if (px >= sx) begin
+            rel_x = px - sx;
+            abs_x = px - sx;
+        end else begin
+            rel_x = sx - px;
+            abs_x = sx - px;
+        end
+        
+        if (py >= sy) begin
+            rel_y = py - sy;
+            abs_y = py - sy;
+        end else begin
+            rel_y = sy - py;
+            abs_y = sy - py;
+        end
+        
+        // Check if pixel is within snowflake bounds
+        if (abs_x > SNOWFLAKE_SIZE/2 || abs_y > SNOWFLAKE_SIZE/2) begin
+            draw_snowflake = 24'h0;  // Transparent
+        end else begin
+            // Simple snowflake pattern: center + 4 lines (horizontal, vertical, 2 diagonals)
+            // Center dot
+            if (abs_x < 2 && abs_y < 2) begin
+                draw_snowflake = COLOR_SNOWFLAKE;
+            end
+            // Horizontal line
+            else if (abs_y < 2 && abs_x < SNOWFLAKE_SIZE/2) begin
+                draw_snowflake = COLOR_SNOWFLAKE;
+            end
+            // Vertical line
+            else if (abs_x < 2 && abs_y < SNOWFLAKE_SIZE/2) begin
+                draw_snowflake = COLOR_SNOWFLAKE;
+            end
+            // Diagonal 1: check if on line y = x (within tolerance)
+            else if (abs_x == abs_y && abs_x < SNOWFLAKE_SIZE/2) begin
+                draw_snowflake = COLOR_SNOWFLAKE;
+            end
+            // Diagonal 2: check if on line y = -x (within tolerance) - simplified
+            else if ((abs_x + abs_y < 3) && (abs_x > 1 || abs_y > 1)) begin
+                draw_snowflake = COLOR_SNOWFLAKE;
+            end
+            else begin
+                draw_snowflake = 24'h0;  // Transparent
+            end
+        end
+    end
+endfunction
 
+// Check if any snowflake is at this pixel
+wire [23:0] snowflake_color [0:NUM_SNOWFLAKES-1];
+genvar i;
+generate
+    for (i = 0; i < NUM_SNOWFLAKES; i = i + 1) begin : gen_snowflakes
+        assign snowflake_color[i] = draw_snowflake(HCNT, VCNT, snowflake_x[i], snowflake_y[i], snowflake_rot[i]);
+    end
+endgenerate
+
+integer j;
 always @(posedge clk_i) begin
     if (rst_i) begin
         HD <= 1'b0;
@@ -82,9 +142,12 @@ always @(posedge clk_i) begin
         HCNT <= 12'd0;
         VCNT <= 11'd0;
         frame_counter <= 26'd0;
-        sprite_x <= CENTER_X - SPRITE_SIZE/2;
-        sprite_y <= CENTER_Y - SPRITE_SIZE/2;
-        blink_state <= 1'b0;
+        for (j = 0; j < NUM_SNOWFLAKES; j = j + 1) begin
+            snowflake_x[j] <= (j * 160) % 1920;  // Distribute across screen
+            snowflake_y[j] <= (j * 90) % 1080;   // Stagger vertically
+            snowflake_rot[j] <= j * 21;           // Different rotation
+            snowflake_speed[j] <= (j % 8) + 1;    // Speed 1-8
+        end
         vid_rgb_d1 <= 24'h00_00_00;
         dvh_sync_d1 <= 3'b000;
     end else if(cen_i) begin
@@ -109,63 +172,36 @@ always @(posedge clk_i) begin
             // Update animation once per frame
             frame_counter <= frame_counter + 1;
             
-            // Bouncing animation - move sprite up and down
-            if (frame_counter[8:0] < 9'd256) begin
-                sprite_y <= CENTER_Y - SPRITE_SIZE/2 - (frame_counter[7:0] >> 2);
-            end else begin
-                sprite_y <= CENTER_Y - SPRITE_SIZE/2 + ((frame_counter[7:0] - 9'd256) >> 2);
+            // Animate snowflakes
+            for (j = 0; j < NUM_SNOWFLAKES; j = j + 1) begin
+                // Move snowflake down
+                if (snowflake_y[j] + snowflake_speed[j] >= 1080) begin
+                    // Reset to top with random X position
+                    snowflake_y[j] <= 11'd0;
+                    snowflake_x[j] <= (snowflake_x[j] + 137) % 1920;  // Pseudo-random
+                end else begin
+                    snowflake_y[j] <= snowflake_y[j] + snowflake_speed[j];
+                end
+                
+                // Rotate snowflake
+                snowflake_rot[j] <= snowflake_rot[j] + (j % 4) + 1;  // Different rotation speeds
             end
-            
-            // Blinking animation
-            blink_state <= (frame_counter[15:12] == 4'hF);
         end else if (HR) begin  // Horizontal rising edge (entering blank = end of line)
             VCNT <= VCNT + 1;
         end
         
-        // Draw Pikachu sprite - simplified pixel-by-pixel
-        if (in_sprite) begin
-            // Default to yellow body
-            vid_rgb_d1 <= COLOR_YELLOW;
-            
-            // Top section - ears (rows 0-8)
-            if (sprite_rel_y < 8) begin
-                if ((sprite_rel_x >= 20 && sprite_rel_x < 28) || (sprite_rel_x >= 36 && sprite_rel_x < 44)) begin
-                    vid_rgb_d1 <= COLOR_BROWN;  // Ears
-                end else begin
-                    vid_rgb_d1 <= COLOR_BG;  // Background around ears
-                end
-            end
-            // Face section (rows 8-56)
-            else if (sprite_rel_y >= 8 && sprite_rel_y < 56) begin
-                // Eyes (rows 18-22)
-                if (sprite_rel_y >= 18 && sprite_rel_y < 22) begin
-                    if (sprite_rel_x >= 18 && sprite_rel_x < 22) begin
-                        vid_rgb_d1 <= (blink_state) ? COLOR_YELLOW : COLOR_BLACK;  // Left eye
-                    end else if (sprite_rel_x >= 42 && sprite_rel_x < 46) begin
-                        vid_rgb_d1 <= (blink_state) ? COLOR_YELLOW : COLOR_BLACK;  // Right eye
-                    end
-                end
-                // Cheeks (rows 24-32)
-                else if (sprite_rel_y >= 24 && sprite_rel_y < 32) begin
-                    if (sprite_rel_x >= 6 && sprite_rel_x < 14) begin
-                        vid_rgb_d1 <= COLOR_RED;  // Left cheek
-                    end else if (sprite_rel_x >= 50 && sprite_rel_x < 58) begin
-                        vid_rgb_d1 <= COLOR_RED;  // Right cheek
-                    end
-                end
-                // Mouth (rows 36-42)
-                else if (sprite_rel_y >= 36 && sprite_rel_y < 42) begin
-                    if (sprite_rel_x >= 28 && sprite_rel_x < 36) begin
-                        vid_rgb_d1 <= COLOR_BLACK;  // Mouth
-                    end
-                end
-            end
-            // Bottom section (rows 56-64)
-            else begin
-                vid_rgb_d1 <= COLOR_YELLOW;
-            end
+        // Draw background with gradient
+        if (VCNT < 540) begin
+            vid_rgb_d1 <= COLOR_BG_DARK + ((540 - VCNT) >> 4);
         end else begin
-            vid_rgb_d1 <= COLOR_BG;  // Background
+            vid_rgb_d1 <= COLOR_BG_DARK + ((VCNT - 540) >> 4);
+        end
+        
+        // Draw snowflakes on top (check each snowflake, later ones draw on top)
+        for (j = 0; j < NUM_SNOWFLAKES; j = j + 1) begin
+            if (snowflake_color[j] != 24'h0) begin
+                vid_rgb_d1 <= snowflake_color[j];
+            end
         end
         
         dvh_sync_d1 <= dvh_sync_i;

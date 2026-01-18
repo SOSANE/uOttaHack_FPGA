@@ -1,0 +1,24 @@
+// Tang Nano 9K Pin Constraints for ECG Neural Network Display
+// Board: Sipeed Tang Nano 9K (GW1NR-9C)
+
+// System Clock (27MHz)
+IO_LOC "clk" 52;
+IO_PORT "clk" PULL_MODE=UP;
+
+// Reset Button (directly usable)
+IO_LOC "reset" 4;
+IO_PORT "reset" PULL_MODE=DOWN;
+
+// VGA Sync Signals
+IO_LOC "hsync" 25;
+IO_LOC "vsync" 26;
+IO_PORT "hsync" DRIVE=8;
+IO_PORT "vsync" DRIVE=8;
+
+// RGB Output (3-bit VGA)
+IO_LOC "rgb[2]" 27;
+IO_LOC "rgb[1]" 28;
+IO_LOC "rgb[0]" 29;
+IO_PORT "rgb[2]" DRIVE=8;
+IO_PORT "rgb[1]" DRIVE=8;
+IO_PORT "rgb[0]" DRIVE=8;

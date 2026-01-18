@@ -99,4 +99,3 @@ assign dvh_sync_o  = dvh_sync_d1;
 assign vid_rgb_o   = vid_rgb_d1;
 
 endmodule
-
